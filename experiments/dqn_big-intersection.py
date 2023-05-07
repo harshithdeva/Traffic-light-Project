@@ -1,7 +1,13 @@
+from sumo_rl import SumoEnvironment
+from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.dqn.dqn import DQN
+import traci
+import numpy as np
 import os
 import sys
 
-import gym
+import gymnasium
+sys.modules["gym"] = gymnasium
 
 
 if "SUMO_HOME" in os.environ:
@@ -9,11 +15,6 @@ if "SUMO_HOME" in os.environ:
     sys.path.append(tools)
 else:
     sys.exit("Please declare the environment variable 'SUMO_HOME'")
-import numpy as np
-import traci
-from stable_baselines3.dqn.dqn import DQN
-
-from sumo_rl import SumoEnvironment
 
 
 env = SumoEnvironment(
@@ -23,6 +24,17 @@ env = SumoEnvironment(
     out_csv_name="outputs/big-intersection/dqn",
     use_gui=True,
     num_seconds=5400,
+    yellow_time=4,
+    min_green=5,
+    max_green=60,
+)
+eval_env = SumoEnvironment(
+    net_file="nets/big-intersection/big-intersection.net.xml",
+    single_agent=True,
+    route_file="nets/big-intersection/routes.rou.xml",
+    out_csv_name="outputs/big-intersection/dqn_test",
+    use_gui=True,
+    num_seconds=1000,
     yellow_time=4,
     min_green=5,
     max_green=60,
@@ -40,4 +52,10 @@ model = DQN(
     exploration_final_eps=0.01,
     verbose=1,
 )
-model.learn(total_timesteps=100000)
+
+model.load('logs/best_model.zip')
+
+eval_callback = EvalCallback(eval_env, best_model_save_path='./logs/',
+                             log_path='./logs/', eval_freq=500,
+                             deterministic=True, render=False)
+model.learn(total_timesteps=100000, callback=eval_callback)

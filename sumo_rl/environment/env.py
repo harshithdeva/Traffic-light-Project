@@ -95,7 +95,7 @@ class SumoEnvironment(gym.Env):
         min_green: int = 5,
         max_green: int = 50,
         single_agent: bool = False,
-        reward_fn: Union[str, Callable, dict] = "diff-waiting-time",
+        reward_fn: Union[str, Callable, dict] = "queue",
         observation_class: ObservationFunction = DefaultObservationFunction,
         add_system_info: bool = True,
         add_per_agent_info: bool = True,
@@ -106,7 +106,8 @@ class SumoEnvironment(gym.Env):
         render_mode: Optional[str] = None,
     ) -> None:
         """Initialize the environment."""
-        assert render_mode is None or render_mode in self.metadata["render_modes"], "Invalid render mode."
+        assert render_mode is None or render_mode in self.metadata[
+            "render_modes"], "Invalid render mode."
         self.render_mode = render_mode
         self.virtual_display = virtual_display
         self.disp = None
@@ -125,7 +126,8 @@ class SumoEnvironment(gym.Env):
         self.sim_max_time = num_seconds
         self.delta_time = delta_time  # seconds on sumo at each step
         self.max_depart_delay = max_depart_delay  # Max wait time to insert a vehicle
-        self.waiting_time_memory = waiting_time_memory  # Number of seconds to remember the waiting time of a vehicle (see https://sumo.dlr.de/pydoc/traci._vehicle.html#VehicleDomain-getAccumulatedWaitingTime)
+        # Number of seconds to remember the waiting time of a vehicle (see https://sumo.dlr.de/pydoc/traci._vehicle.html#VehicleDomain-getAccumulatedWaitingTime)
+        self.waiting_time_memory = waiting_time_memory
         self.time_to_teleport = time_to_teleport
         self.min_green = min_green
         self.max_green = max_green
@@ -143,10 +145,12 @@ class SumoEnvironment(gym.Env):
         self.sumo = None
 
         if LIBSUMO:
-            traci.start([sumolib.checkBinary("sumo"), "-n", self._net])  # Start only to retrieve traffic light information
+            # Start only to retrieve traffic light information
+            traci.start([sumolib.checkBinary("sumo"), "-n", self._net])
             conn = traci
         else:
-            traci.start([sumolib.checkBinary("sumo"), "-n", self._net], label="init_connection" + self.label)
+            traci.start([sumolib.checkBinary("sumo"), "-n", self._net],
+                        label="init_connection" + self.label)
             conn = traci.getConnection("init_connection" + self.label)
 
         self.ts_ids = list(conn.trafficlight.getIDList())
@@ -193,6 +197,21 @@ class SumoEnvironment(gym.Env):
         self.observations = {ts: None for ts in self.ts_ids}
         self.rewards = {ts: None for ts in self.ts_ids}
 
+    def get_traffic_signal(self):
+        traffic_signal_list = [self.traffic_signals[ts] for ts in self.ts_ids]
+        return traffic_signal_list
+
+    def get_vehicles_list(self):
+        return (self.sumo.vehicle.getIDCount(), self.sumo.simulation.getTime())
+
+    def get_accumulated_waiting_time(self) -> float:
+        wait_time = 0.0
+        for veh_id in self.sumo.vehicle.getIDList():
+            wait_time_per_vehicle = self.sumo.vehicle.getAccumulatedWaitingTime(
+                veh_id)
+            wait_time = wait_time + wait_time_per_vehicle
+        return wait_time
+
     def _start_simulation(self):
         sumo_cmd = [
             self._sumo_binary,
@@ -220,7 +239,8 @@ class SumoEnvironment(gym.Env):
         if self.use_gui or self.render_mode is not None:
             sumo_cmd.extend(["--start", "--quit-on-end"])
             if self.render_mode == "rgb_array":
-                sumo_cmd.extend(["--window-size", f"{self.virtual_display[0]},{self.virtual_display[1]}"])
+                sumo_cmd.extend(
+                    ["--window-size", f"{self.virtual_display[0]},{self.virtual_display[1]}"])
                 from pyvirtualdisplay.smartdisplay import SmartDisplay
 
                 print("Creating a virtual display.")
@@ -362,13 +382,15 @@ class SumoEnvironment(gym.Env):
 
     def _compute_observations(self):
         self.observations.update(
-            {ts: self.traffic_signals[ts].compute_observation() for ts in self.ts_ids if self.traffic_signals[ts].time_to_act}
+            {ts: self.traffic_signals[ts].compute_observation(
+            ) for ts in self.ts_ids if self.traffic_signals[ts].time_to_act}
         )
         return {ts: self.observations[ts].copy() for ts in self.observations.keys() if self.traffic_signals[ts].time_to_act}
 
     def _compute_rewards(self):
         self.rewards.update(
-            {ts: self.traffic_signals[ts].compute_reward() for ts in self.ts_ids if self.traffic_signals[ts].time_to_act}
+            {ts: self.traffic_signals[ts].compute_reward(
+            ) for ts in self.ts_ids if self.traffic_signals[ts].time_to_act}
         )
         return {ts: self.rewards[ts] for ts in self.rewards.keys() if self.traffic_signals[ts].time_to_act}
 
@@ -402,7 +424,8 @@ class SumoEnvironment(gym.Env):
     def _get_system_info(self):
         vehicles = self.sumo.vehicle.getIDList()
         speeds = [self.sumo.vehicle.getSpeed(vehicle) for vehicle in vehicles]
-        waiting_times = [self.sumo.vehicle.getWaitingTime(vehicle) for vehicle in vehicles]
+        waiting_times = [self.sumo.vehicle.getWaitingTime(
+            vehicle) for vehicle in vehicles]
         return {
             # In SUMO, a vehicle is considered halting if its speed is below 0.1 m/s
             "system_total_stopped": sum(int(speed < 0.1) for speed in speeds),
@@ -412,18 +435,21 @@ class SumoEnvironment(gym.Env):
         }
 
     def _get_per_agent_info(self):
-        stopped = [self.traffic_signals[ts].get_total_queued() for ts in self.ts_ids]
+        stopped = [self.traffic_signals[ts].get_total_queued()
+                   for ts in self.ts_ids]
         accumulated_waiting_time = [
             sum(self.traffic_signals[ts].get_accumulated_waiting_time_per_lane()) for ts in self.ts_ids
         ]
-        average_speed = [self.traffic_signals[ts].get_average_speed() for ts in self.ts_ids]
+        average_speed = [self.traffic_signals[ts].get_average_speed()
+                         for ts in self.ts_ids]
         info = {}
         for i, ts in enumerate(self.ts_ids):
             info[f"{ts}_stopped"] = stopped[i]
             info[f"{ts}_accumulated_waiting_time"] = accumulated_waiting_time[i]
             info[f"{ts}_average_speed"] = average_speed[i]
         info["agents_total_stopped"] = sum(stopped)
-        info["agents_total_accumulated_waiting_time"] = sum(accumulated_waiting_time)
+        info["agents_total_accumulated_waiting_time"] = sum(
+            accumulated_waiting_time)
         return info
 
     def close(self):
@@ -470,15 +496,18 @@ class SumoEnvironment(gym.Env):
         if out_csv_name is not None:
             df = pd.DataFrame(self.metrics)
             Path(Path(out_csv_name).parent).mkdir(parents=True, exist_ok=True)
-            df.to_csv(out_csv_name + f"_conn{self.label}_ep{episode}" + ".csv", index=False)
+            df.to_csv(out_csv_name +
+                      f"_conn{self.label}_ep{episode}" + ".csv", index=False)
 
     # Below functions are for discrete state space
 
     def encode(self, state, ts_id):
         """Encode the state of the traffic signal into a hashable object."""
-        phase = int(np.where(state[: self.traffic_signals[ts_id].num_green_phases] == 1)[0])
+        phase = int(
+            np.where(state[: self.traffic_signals[ts_id].num_green_phases] == 1)[0])
         min_green = state[self.traffic_signals[ts_id].num_green_phases]
-        density_queue = [self._discretize_density(d) for d in state[self.traffic_signals[ts_id].num_green_phases + 1 :]]
+        density_queue = [self._discretize_density(
+            d) for d in state[self.traffic_signals[ts_id].num_green_phases + 1:]]
         # tuples are hashable and can be used as key in python dictionary
         return tuple([phase, min_green] + density_queue)
 
@@ -494,7 +523,8 @@ class SumoEnvironmentPZ(AECEnv, EzPickle):
     The arguments are the same as for :py:class:`sumo_rl.environment.env.SumoEnvironment`.
     """
 
-    metadata = {"render.modes": ["human", "rgb_array"], "name": "sumo_rl_v0", "is_parallelizable": True}
+    metadata = {"render.modes": ["human", "rgb_array"],
+                "name": "sumo_rl_v0", "is_parallelizable": True}
 
     def __init__(self, **kwargs):
         """Initialize the environment."""
@@ -509,8 +539,10 @@ class SumoEnvironmentPZ(AECEnv, EzPickle):
         self._agent_selector = agent_selector(self.agents)
         self.agent_selection = self._agent_selector.reset()
         # spaces
-        self.action_spaces = {a: self.env.action_spaces(a) for a in self.agents}
-        self.observation_spaces = {a: self.env.observation_spaces(a) for a in self.agents}
+        self.action_spaces = {
+            a: self.env.action_spaces(a) for a in self.agents}
+        self.observation_spaces = {
+            a: self.env.observation_spaces(a) for a in self.agents}
 
         # dicts
         self.rewards = {a: 0 for a in self.agents}
@@ -566,7 +598,8 @@ class SumoEnvironmentPZ(AECEnv, EzPickle):
         if not self.action_spaces[agent].contains(action):
             raise Exception(
                 "Action for agent {} must be in Discrete({})."
-                "It is currently {}".format(agent, self.action_spaces[agent].n, action)
+                "It is currently {}".format(
+                    agent, self.action_spaces[agent].n, action)
             )
 
         self.env._apply_actions({agent: action})
